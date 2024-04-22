@@ -2,6 +2,7 @@
 CMU Poker Bot Competition Game Engine 2024
 """
 
+import asyncio
 import csv
 import os
 from collections import deque
@@ -124,7 +125,7 @@ class Game:
         self.log.append(f"{self.players[0].name} Bankroll: {self.players[0].bankroll}")
         self.log.append(f"{self.players[1].name} Bankroll: {self.players[1].bankroll}")
 
-    def run_round(self, last_round: bool) -> None:
+    async def run_round(self, last_round: bool) -> None:
         """
         Runs one round of poker (1 hand).
         """
@@ -148,7 +149,7 @@ class Game:
                 action = FoldAction()
             else:
                 try:
-                    action = player.request_action(
+                    action = await player.request_action(
                         hands[active], round_state.board, self.new_actions[active]
                     )
                 except TimeoutError:
@@ -167,7 +168,7 @@ class Game:
 
         board = round_state.previous_state.board
         for index, (player, delta) in enumerate(zip(self.players, round_state.deltas)):
-            player.end_round(
+            await player.end_round(
                 hands[index],
                 hands[1 - index],
                 board,
@@ -178,7 +179,7 @@ class Game:
             player.bankroll += delta
         self.log_terminal_state(round_state)
 
-    def run_match(self) -> None:
+    async def run_match(self) -> None:
         """
         Runs one match of poker.
         """
@@ -189,8 +190,14 @@ class Game:
         ]
         player_names = [PLAYER_1_NAME, PLAYER_2_NAME]
 
+        # Connect to the WebSocket server for each player
+        await asyncio.gather(*[player.connect() for player in self.players])
+
         print("Checking ready...")
-        ready = [player.check_ready(player_names) for player in self.players]
+        ready = await asyncio.gather(
+            *[player.check_ready(player_names) for player in self.players]
+        )
+        print(f"Ready status: {ready}")
         if not all(ready):
             print("One or more bots are not ready. Aborting the match.")
             self.log.append("One or more bots are not ready. Aborting the match.")
@@ -218,20 +225,20 @@ class Game:
                     )
                 self.log.append(f"\nRound #{self.round_num}")
 
-                self.run_round((self.round_num == NUM_ROUNDS))
+                await self.run_round((self.round_num == NUM_ROUNDS))
                 self.players = self.players[::-1]  # Alternate the dealer
 
-        self.log.append(
-            f"{self.original_players[0].name} Bankroll: {self.original_players[0].bankroll}"
-        )
-        self.log.append(
-            f"{self.original_players[1].name} Bankroll: {self.original_players[1].bankroll}"
-        )
+            self.log.append(
+                f"{self.original_players[0].name} Bankroll: {self.original_players[0].bankroll}"
+            )
+            self.log.append(
+                f"{self.original_players[1].name} Bankroll: {self.original_players[1].bankroll}"
+            )
 
-        self._finalize_log()
-        add_match_entry(
-            self.original_players[0].bankroll, self.original_players[1].bankroll
-        )
+            self._finalize_log()
+            add_match_entry(
+                self.original_players[0].bankroll, self.original_players[1].bankroll
+            )
 
     def _finalize_log(self) -> None:
         """

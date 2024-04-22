@@ -4,6 +4,11 @@ from collections import deque
 from typing import Deque, List, Optional
 
 import websockets
+from websockets.exceptions import (
+    ConnectionClosed,
+    InvalidHandshake,
+    InvalidURI,
+)
 
 from .actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
 from .config import (
@@ -41,12 +46,9 @@ class Client:
                 )
                 print(f"Connected to {self.websocket_uri}")
                 return
-            except (
-                websockets.exceptions.InvalidURI,
-                websockets.exceptions.InvalidHandshake,
-            ):
+            except (InvalidURI, InvalidHandshake):
                 raise RuntimeError(f"Invalid WebSocket URI: {self.websocket_uri}")
-            except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+            except (asyncio.TimeoutError, ConnectionClosed):
                 if attempt < CONNECT_RETRIES - 1:
                     await asyncio.sleep(CONNECT_TIMEOUT)
                 else:
@@ -56,22 +58,30 @@ class Client:
 
     async def check_ready(self, player_names: List[str]) -> bool:
         request = {"ready_check": {"player_names": player_names}}
+        print(f"Sending ready check request: {request}")
         for attempt in range(READY_CHECK_RETRIES):
             try:
                 await asyncio.wait_for(
                     self.websocket.send(json.dumps(request)),
                     timeout=READY_CHECK_TIMEOUT,
                 )
+                print(f"Ready check request sent for {self.name}")
                 response = await asyncio.wait_for(
                     self.websocket.recv(), timeout=READY_CHECK_TIMEOUT
                 )
+                print(f"Ready check response received for {self.name}: {response}")
                 response_data = json.loads(response)
                 return response_data["ready"]
-            except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+            except (asyncio.TimeoutError, ConnectionClosed):
                 if attempt < READY_CHECK_RETRIES - 1:
+                    print(
+                        f"Ready check attempt {attempt + 1} failed for {self.name}. Retrying..."
+                    )
                     await asyncio.sleep(READY_CHECK_TIMEOUT)
                 else:
-                    print(f"Bot {self.name} is not ready")
+                    print(
+                        f"Bot {self.name} is not ready after {READY_CHECK_RETRIES} attempts"
+                    )
                     return False
 
     async def request_action(
@@ -101,7 +111,7 @@ class Client:
                     if self.game_clock <= 0:
                         raise TimeoutError("Game clock has run out")
                 return action
-            except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+            except (asyncio.TimeoutError, ConnectionClosed):
                 if attempt < ACTION_REQUEST_RETRIES - 1:
                     await asyncio.sleep(ACTION_REQUEST_TIMEOUT)
                 else:
@@ -145,7 +155,7 @@ class Client:
                         )
                         self.log_size = PLAYER_LOG_SIZE_LIMIT
                     break
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionClosed:
             print("An error occurred during end round")
 
     async def close(self) -> None:

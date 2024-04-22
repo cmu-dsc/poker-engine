@@ -40,6 +40,7 @@ class Runner:
                 break
 
     async def ReadyCheck(self, request):
+        print(f"ReadyCheck called with request: {request}")
         return {"ready": True}
 
     async def RequestAction(self, request):
@@ -161,9 +162,9 @@ class Runner:
         self.round_flag = False
 
 
-async def run_bot(pokerbot):
+async def run_bot(pokerbot, port):
     runner = Runner(pokerbot)
-    async with websockets.serve(runner.handle_message, "localhost", 8765):
+    async with websockets.serve(runner.handle_message, "localhost", port):
         await asyncio.Future()
 
 

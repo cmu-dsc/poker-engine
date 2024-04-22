@@ -2,8 +2,10 @@
 Simple example pokerbot, written in Python.
 """
 
+import asyncio
 import itertools
 import pickle
+from argparse import ArgumentParser
 from typing import Optional
 
 from skeleton.actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
@@ -37,13 +39,17 @@ class Player(Bot):
         Nothing.
         """
         self.log = []
-        self.pre_computed_probs = pickle.load(open("python_skeleton/skeleton/pre_computed_probs.pkl", "rb")) 
+        self.pre_computed_probs = pickle.load(
+            open("python_skeleton/skeleton/pre_computed_probs.pkl", "rb")
+        )
         pass
 
-    def handle_new_round(self, game_state: GameState, round_state: RoundState, active: int) -> None:
+    def handle_new_round(
+        self, game_state: GameState, round_state: RoundState, active: int
+    ) -> None:
         """
         Called when a new round starts. Called NUM_ROUNDS times.
-        
+
         Args:
             game_state (GameState): The state of the game.
             round_state (RoundState): The state of the round.
@@ -52,17 +58,23 @@ class Player(Bot):
         Returns:
             None
         """
-        #my_bankroll = game_state.bankroll # the total number of chips you've gained or lost from the beginning of the game to the start of this round
-        #game_clock = game_state.game_clock # the total number of seconds your bot has left to play this game
-        #round_num = game_state.round_num # the round number from 1 to NUM_ROUNDS
-        #my_cards = round_state.hands[active] # your cards
-        #big_blind = bool(active) # True if you are the big blind
+        # my_bankroll = game_state.bankroll # the total number of chips you've gained or lost from the beginning of the game to the start of this round
+        # game_clock = game_state.game_clock # the total number of seconds your bot has left to play this game
+        # round_num = game_state.round_num # the round number from 1 to NUM_ROUNDS
+        # my_cards = round_state.hands[active] # your cards
+        # big_blind = bool(active) # True if you are the big blind
         self.log = []
         self.log.append("================================")
         self.log.append("new round")
         pass
 
-    def handle_round_over(self, game_state: GameState, terminal_state: TerminalState, active: int, is_match_over: bool) -> Optional[str]:
+    def handle_round_over(
+        self,
+        game_state: GameState,
+        terminal_state: TerminalState,
+        active: int,
+        is_match_over: bool,
+    ) -> Optional[str]:
         """
         Called when a round ends. Called NUM_ROUNDS times.
 
@@ -74,11 +86,11 @@ class Player(Bot):
         Returns:
             Your logs.
         """
-        #my_delta = terminal_state.deltas[active] # your bankroll change from this round
-        #previous_state = terminal_state.previous_state # RoundState before payoffs
-        #street = previous_state.street # 0, 3, 4, or 5 representing when this round ended
-        #my_cards = previous_state.hands[active] # your cards
-        #opp_cards = previous_state.hands[1-active] # opponent's cards or [] if not revealed
+        # my_delta = terminal_state.deltas[active] # your bankroll change from this round
+        # previous_state = terminal_state.previous_state # RoundState before payoffs
+        # street = previous_state.street # 0, 3, 4, or 5 representing when this round ended
+        # my_cards = previous_state.hands[active] # your cards
+        # opp_cards = previous_state.hands[1-active] # opponent's cards or [] if not revealed
         self.log.append("game over")
         self.log.append("================================\n")
 
@@ -108,10 +120,16 @@ class Player(Bot):
         Returns:
             Action: The action you want to take.
         """
-        my_contribution = STARTING_STACK - observation["my_stack"] # the number of chips you have contributed to the pot
-        opp_contribution = STARTING_STACK - observation["opp_stack"] # the number of chips your opponent has contributed to the pot
-        pot_size = my_contribution + opp_contribution # the number of chips in the pot
-        continue_cost = observation["opp_pip"] - observation["my_pip"] # the number of chips needed to stay in the pot
+        my_contribution = (
+            STARTING_STACK - observation["my_stack"]
+        )  # the number of chips you have contributed to the pot
+        opp_contribution = (
+            STARTING_STACK - observation["opp_stack"]
+        )  # the number of chips your opponent has contributed to the pot
+        pot_size = my_contribution + opp_contribution  # the number of chips in the pot
+        continue_cost = (
+            observation["opp_pip"] - observation["my_pip"]
+        )  # the number of chips needed to stay in the pot
 
         self.log.append("My cards: " + str(observation["my_cards"]))
         self.log.append("Board cards: " + str(observation["board_cards"]))
@@ -127,7 +145,11 @@ class Player(Bot):
         # prob = sum(result) / len(possible_card_comb)
 
         # Use pre-computed probability calculation
-        equity = self.pre_computed_probs['_'.join(sorted(observation["my_cards"])) + '_' + '_'.join(sorted(observation["board_cards"]))]
+        equity = self.pre_computed_probs[
+            "_".join(sorted(observation["my_cards"]))
+            + "_"
+            + "_".join(sorted(observation["board_cards"]))
+        ]
         pot_odds = continue_cost / (pot_size + continue_cost)
 
         self.log.append(f"Equity: {equity}")
@@ -139,7 +161,7 @@ class Player(Bot):
             self.log.append(f"Adjusted equity: {equity}")
 
         if equity > 0.8 and RaiseAction in observation["legal_actions"]:
-            raise_amount = min(int(pot_size*0.75), observation["max_raise"])
+            raise_amount = min(int(pot_size * 0.75), observation["max_raise"])
             raise_amount = max(raise_amount, observation["min_raise"])
             action = RaiseAction(raise_amount)
         elif CallAction in observation["legal_actions"] and equity >= pot_odds:
@@ -153,5 +175,16 @@ class Player(Bot):
 
         return action
 
-if __name__ == '__main__':
-    run_bot(Player())
+
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--port", type=int, default=8765, help="Port number for the bot server"
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    pokerbot = Player()
+    asyncio.run(run_bot(pokerbot, args.port))

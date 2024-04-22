@@ -42,8 +42,10 @@ class RoundState(
                 board = self.board + list(combo)
                 score0 = evaluate(self.hands[0], board)
                 score1 = evaluate(self.hands[1], board)
-                if score0 > score1: p0Eq += 2
-                if score0 == score1: p0Eq += 1
+                if score0 > score1:
+                    p0Eq += 2
+                if score0 == score1:
+                    p0Eq += 1
                 comb += 2
             delta = round(2 * STARTING_STACK * p0Eq / comb) - STARTING_STACK
         else:

@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 from argparse import ArgumentParser
 from multiprocessing import Process
@@ -16,7 +17,7 @@ def run_game_engine() -> None:
     Runs the game engine process.
     """
     game = Game()
-    game.run_match()
+    asyncio.run(game.run_match())
 
 
 if __name__ == "__main__":
