@@ -1,7 +1,6 @@
 from collections import namedtuple
 from typing import Union
 
-
 FoldAction = namedtuple("FoldAction", [])
 CallAction = namedtuple("CallAction", [])
 CheckAction = namedtuple("CheckAction", [])

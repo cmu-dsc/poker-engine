@@ -19,9 +19,9 @@ high card (7020): everything else
 TOTAL: 17550 combos
 """
 
+from itertools import combinations
 from random import shuffle
 from typing import List
-from itertools import combinations
 
 
 class ShortDeck:

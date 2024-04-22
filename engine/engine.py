@@ -2,10 +2,10 @@
 CMU Poker Bot Competition Game Engine 2024
 """
 
-from collections import deque
-import os
-from typing import Deque, List
 import csv
+import os
+from collections import deque
+from typing import Deque, List
 
 from .actions import (
     STREET_NAMES,
@@ -16,23 +16,23 @@ from .actions import (
     RaiseAction,
     TerminalState,
 )
+from .client import Client
 from .config import (
     BIG_BLIND,
     BOT_LOG_FILENAME,
     GAME_LOG_FILENAME,
     LOGS_DIRECTORY,
     NUM_ROUNDS,
-    PLAYER_1_DNS,
     PLAYER_1_NAME,
-    PLAYER_2_DNS,
+    PLAYER_1_WEBSOCKET_URI,
     PLAYER_2_NAME,
+    PLAYER_2_WEBSOCKET_URI,
     SMALL_BLIND,
     STARTING_STACK,
-    upload_logs,
     add_match_entry,
+    upload_logs,
 )
 from .evaluate import ShortDeck
-from .client import Client
 from .roundstate import RoundState
 
 
@@ -73,13 +73,24 @@ class Game:
             self.log.append(f"{self.players[0].name} dealt {round_state.hands[0]}")
             self.log.append(f"{self.players[1].name} dealt {round_state.hands[1]}")
 
-            self._create_csv_row(round_state, self.players[0].name, "posts blind", SMALL_BLIND)
-            self._create_csv_row(round_state, self.players[1].name, "posts blind", BIG_BLIND)
+            self._create_csv_row(
+                round_state, self.players[0].name, "posts blind", SMALL_BLIND
+            )
+            self._create_csv_row(
+                round_state, self.players[1].name, "posts blind", BIG_BLIND
+            )
 
         elif round_state.street > 0 and round_state.button == 1:
             # log the pot every street
-            pot = STARTING_STACK - round_state.stacks[0] + STARTING_STACK - round_state.stacks[1]
-            self.log.append(f"{STREET_NAMES[round_state.street]} Board: {round_state.board} Pot: {pot}")
+            pot = (
+                STARTING_STACK
+                - round_state.stacks[0]
+                + STARTING_STACK
+                - round_state.stacks[1]
+            )
+            self.log.append(
+                f"{STREET_NAMES[round_state.street]} Board: {round_state.board} Pot: {pot}"
+            )
 
     def log_action(
         self, player_name: str, action: Action, round_state: RoundState
@@ -173,8 +184,8 @@ class Game:
         """
         print("Starting the Poker Game...")
         self.players = [
-            Client(PLAYER_1_NAME, PLAYER_1_DNS),
-            Client(PLAYER_2_NAME, PLAYER_2_DNS),
+            Client(PLAYER_1_NAME, PLAYER_1_WEBSOCKET_URI),
+            Client(PLAYER_2_NAME, PLAYER_2_WEBSOCKET_URI),
         ]
         player_names = [PLAYER_1_NAME, PLAYER_2_NAME]
 
@@ -187,7 +198,9 @@ class Game:
                 self.log.append("Both players forfeited the match.")
             else:
                 forfeiter = ready.index(False)
-                self.log.append("Player {} forfeited the match.".format(player_names[forfeiter]))
+                self.log.append(
+                    "Player {} forfeited the match.".format(player_names[forfeiter])
+                )
                 # Fold 1000 rounds = 1*500 small blind + 2*500 big blind = 1500
                 self.players[1 - forfeiter].bankroll += 1500
                 self.players[forfeiter].bankroll -= 1500
@@ -197,18 +210,28 @@ class Game:
             for self.round_num in range(1, NUM_ROUNDS + 1):
                 if self.round_num % 50 == 0:
                     print(f"Starting round {self.round_num}...")
-                    print(f"{self.players[0].name} remaining time: {self.players[0].game_clock}")
-                    print(f"{self.players[1].name} remaining time: {self.players[1].game_clock}")
+                    print(
+                        f"{self.players[0].name} remaining time: {self.players[0].game_clock}"
+                    )
+                    print(
+                        f"{self.players[1].name} remaining time: {self.players[1].game_clock}"
+                    )
                 self.log.append(f"\nRound #{self.round_num}")
 
                 self.run_round((self.round_num == NUM_ROUNDS))
                 self.players = self.players[::-1]  # Alternate the dealer
 
-        self.log.append(f"{self.original_players[0].name} Bankroll: {self.original_players[0].bankroll}")
-        self.log.append(f"{self.original_players[1].name} Bankroll: {self.original_players[1].bankroll}")
+        self.log.append(
+            f"{self.original_players[0].name} Bankroll: {self.original_players[0].bankroll}"
+        )
+        self.log.append(
+            f"{self.original_players[1].name} Bankroll: {self.original_players[1].bankroll}"
+        )
 
         self._finalize_log()
-        add_match_entry(self.original_players[0].bankroll, self.original_players[1].bankroll)
+        add_match_entry(
+            self.original_players[0].bankroll, self.original_players[1].bankroll
+        )
 
     def _finalize_log(self) -> None:
         """
@@ -277,10 +300,14 @@ class Game:
             if RaiseAction in legal_actions and min_raise <= amount <= max_raise:
                 return action
             elif CallAction in legal_actions and amount >= continue_cost:
-                self.log.append(f"{player_name} attempted illegal RaiseAction with amount {amount}")
+                self.log.append(
+                    f"{player_name} attempted illegal RaiseAction with amount {amount}"
+                )
                 return CallAction()
             else:
-                self.log.append(f"{player_name} attempted illegal RaiseAction with amount {amount}")
+                self.log.append(
+                    f"{player_name} attempted illegal RaiseAction with amount {amount}"
+                )
         elif type(action) in legal_actions:
             return action
         else:
@@ -291,17 +318,27 @@ class Game:
     def _create_csv_row(
         self, round_state: RoundState, player_name: str, action: str, action_amt: int
     ) -> None:
-        self.csvlog.append([
-            self.round_num,
-            round_state.street,
-            player_name,
-            action,
-            action_amt if action_amt else "",
-            " ".join(round_state.hands[0] if self.round_num % 2 == 1 else round_state.hands[1]),
-            " ".join(round_state.hands[1] if self.round_num % 2 == 1 else round_state.hands[0]),
-            " ".join(round_state.board),
-            self.original_players[0].bankroll,
-        ])
+        self.csvlog.append(
+            [
+                self.round_num,
+                round_state.street,
+                player_name,
+                action,
+                action_amt if action_amt else "",
+                " ".join(
+                    round_state.hands[0]
+                    if self.round_num % 2 == 1
+                    else round_state.hands[1]
+                ),
+                " ".join(
+                    round_state.hands[1]
+                    if self.round_num % 2 == 1
+                    else round_state.hands[0]
+                ),
+                " ".join(round_state.board),
+                self.original_players[0].bankroll,
+            ]
+        )
 
 
 if __name__ == "__main__":

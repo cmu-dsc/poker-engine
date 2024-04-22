@@ -1,192 +1,114 @@
-from collections import deque
+import asyncio
 import json
-import grpc
-import os
-import sys
-import time
+from collections import deque
 from typing import Deque, List, Optional
+
+import websockets
 
 from .actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
 from .config import (
-    CONNECT_TIMEOUT,
-    CONNECT_RETRIES,
-    READY_CHECK_TIMEOUT,
-    READY_CHECK_RETRIES,
-    ACTION_REQUEST_TIMEOUT,
     ACTION_REQUEST_RETRIES,
+    ACTION_REQUEST_TIMEOUT,
+    CONNECT_RETRIES,
+    CONNECT_TIMEOUT,
     ENFORCE_GAME_CLOCK,
-    STARTING_GAME_CLOCK,
     PLAYER_LOG_SIZE_LIMIT,
-)
-
-shared_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "shared"))
-sys.path.append(shared_path)
-
-from shared.pokerbot_pb2_grpc import PokerBotStub  # noqa: E402
-from shared.pokerbot_pb2 import (  # noqa: E402
-    ReadyCheckRequest,
-    ActionRequest,
-    EndRoundMessage,
-    ActionType,
-    Action as ProtoAction,
+    READY_CHECK_RETRIES,
+    READY_CHECK_TIMEOUT,
+    STARTING_GAME_CLOCK,
 )
 
 
 class Client:
-    """
-    Handles interactions with one player's pokerbot within the Kubernetes cluster,
-    facilitating the communication between the game engine and the pokerbot for action requests and round updates.
-    """
-
     def __init__(
-        self, name: str, service_dns_name: str, auth_token: Optional[str] = None
+        self, name: str, websocket_uri: str, auth_token: Optional[str] = None
     ) -> None:
-        """
-        Initializes a new Player instance with necessary details for gRPC communication.
-
-        Args:
-            name (str): The name of the player.
-            service_dns_name (str): The DNS name of the service for gRPC communication.
-            auth_token (Optional[str]): An optional authentication token for secure communication.
-        """
         self.name = name
-        self.service_dns_name = service_dns_name
+        self.websocket_uri = websocket_uri
         self.auth_token = auth_token
         self.game_clock = STARTING_GAME_CLOCK
         self.bankroll = 0
-        self.channel = None
-        self.stub = None
+        self.websocket = None
         self.log = deque()
         self.log_size = 0
 
-        self._connect_with_retries()
-
-    def _connect_with_retries(self) -> None:
-        """
-        Establishes a connection to the gRPC server with retries.
-        """
-        retry_options = {
-            "initial_backoff_ms": CONNECT_TIMEOUT * 1000,
-            "max_backoff_ms": CONNECT_TIMEOUT * 1000,
-            "max_attempts": CONNECT_RETRIES,
-            "retry_codes": [grpc.StatusCode.UNAVAILABLE.value],
-        }
-        channel_options = [
-            ("grpc.enable_retries", 1),
-            ("grpc.max_receive_message_length", -1),
-            ("grpc.max_send_message_length", -1),
-            ("grpc.lb_policy_name", "round_robin"),
-            ("grpc.service_config", json.dumps({"retryPolicy": retry_options})),
-        ]
-        self.channel = grpc.insecure_channel(
-            self.service_dns_name, options=channel_options
-        )
-        self.stub = PokerBotStub(self.channel)
-
-        try:
-            grpc.channel_ready_future(self.channel).result()
-            print(f"Connected to {self.service_dns_name}")
-        except grpc.FutureTimeoutError:
-            raise RuntimeError(
-                f"Failed to connect to {self.service_dns_name} after {CONNECT_RETRIES} attempts"
-            )
-
-    def check_ready(self, player_names: List[str]) -> bool:
-        """
-        Sends a readiness check to the pokerbot to verify if it is ready to start or continue the game.
-
-        Args:
-            player_names (List[str]): A list of player names participating in the game.
-
-        Returns:
-            bool: True if the bot is ready, False otherwise.
-        """
-        retry_options = {
-            "initial_backoff_ms": READY_CHECK_TIMEOUT * 1000,
-            "max_backoff_ms": READY_CHECK_TIMEOUT * 1000,
-            "max_attempts": READY_CHECK_RETRIES,
-            "retry_codes": [grpc.StatusCode.UNAVAILABLE.value],
-        }
-        channel_options = [
-            ("grpc.enable_retries", 1),
-            ("grpc.max_receive_message_length", -1),
-            ("grpc.max_send_message_length", -1),
-            ("grpc.lb_policy_name", "round_robin"),
-            ("grpc.service_config", json.dumps({"retryPolicy": retry_options})),
-        ]
-        with grpc.insecure_channel(
-            self.service_dns_name, options=channel_options
-        ) as channel:
-            stub = PokerBotStub(channel)
-            request = ReadyCheckRequest(player_names=player_names)
+    async def connect(self) -> None:
+        for attempt in range(CONNECT_RETRIES):
             try:
-                response = stub.ReadyCheck(request)
-                return response.ready
-            except grpc.RpcError as e:
-                print(f"Bot {self.name} is not ready: {e}")
-                return False
+                self.websocket = await asyncio.wait_for(
+                    websockets.connect(self.websocket_uri),
+                    timeout=CONNECT_TIMEOUT,
+                )
+                print(f"Connected to {self.websocket_uri}")
+                return
+            except (
+                websockets.exceptions.InvalidURI,
+                websockets.exceptions.InvalidHandshake,
+            ):
+                raise RuntimeError(f"Invalid WebSocket URI: {self.websocket_uri}")
+            except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+                if attempt < CONNECT_RETRIES - 1:
+                    await asyncio.sleep(CONNECT_TIMEOUT)
+                else:
+                    raise RuntimeError(
+                        f"Failed to connect to {self.websocket_uri} after {CONNECT_RETRIES} attempts"
+                    )
 
-    def request_action(
+    async def check_ready(self, player_names: List[str]) -> bool:
+        request = {"ready_check": {"player_names": player_names}}
+        for attempt in range(READY_CHECK_RETRIES):
+            try:
+                await asyncio.wait_for(
+                    self.websocket.send(json.dumps(request)),
+                    timeout=READY_CHECK_TIMEOUT,
+                )
+                response = await asyncio.wait_for(
+                    self.websocket.recv(), timeout=READY_CHECK_TIMEOUT
+                )
+                response_data = json.loads(response)
+                return response_data["ready"]
+            except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+                if attempt < READY_CHECK_RETRIES - 1:
+                    await asyncio.sleep(READY_CHECK_TIMEOUT)
+                else:
+                    print(f"Bot {self.name} is not ready")
+                    return False
+
+    async def request_action(
         self, player_hand: List[str], board_cards: List[str], new_actions: Deque[Action]
     ) -> Optional[Action]:
-        """
-        Requests an action from the pokerbot based on the current game state, including the player's hand,
-        visible board cards, and new actions.
-
-        Args:
-            player_hand (List[str]): The cards currently held by the player.
-            board_cards (List[str]): The cards visible on the board.
-            new_actions (Deque[Action]): A deque of actions taken since the last request.
-
-        Returns:
-            Optional[Action]: The action decided by the pokerbot, or None if an error occurred.
-        """
-        retry_options = {
-            "initial_backoff_ms": ACTION_REQUEST_TIMEOUT * 1000,
-            "max_backoff_ms": ACTION_REQUEST_TIMEOUT * 1000,
-            "max_attempts": ACTION_REQUEST_RETRIES,
-            "retry_codes": [grpc.StatusCode.UNAVAILABLE.value],
+        request = {
+            "request_action": {
+                "game_clock": self.game_clock,
+                "player_hand": player_hand,
+                "board_cards": board_cards,
+                "new_actions": self._convert_actions_to_json(new_actions),
+            }
         }
-        channel_options = [
-            ("grpc.enable_retries", 1),
-            ("grpc.max_receive_message_length", -1),
-            ("grpc.max_send_message_length", -1),
-            ("grpc.lb_policy_name", "round_robin"),
-            ("grpc.service_config", json.dumps({"retryPolicy": retry_options})),
-        ]
-        with grpc.insecure_channel(
-            self.service_dns_name, options=channel_options
-        ) as channel:
-            stub = PokerBotStub(channel)
-            proto_actions = self._convert_actions_to_proto(new_actions)
-
-            request = ActionRequest(
-                game_clock=self.game_clock,
-                player_hand=player_hand,
-                board_cards=board_cards,
-                new_actions=proto_actions,
-            )
-
-            start_time = time.perf_counter()
-
+        for attempt in range(ACTION_REQUEST_RETRIES):
             try:
-                response = stub.RequestAction(request)
-                action = self._convert_proto_to_action(response.action)
-            except grpc.RpcError as e:
-                print(f"An error occurred: {e}")
-                action = None
+                await asyncio.wait_for(
+                    self.websocket.send(json.dumps(request)),
+                    timeout=ACTION_REQUEST_TIMEOUT,
+                )
+                response = await asyncio.wait_for(
+                    self.websocket.recv(), timeout=ACTION_REQUEST_TIMEOUT
+                )
+                response_data = json.loads(response)
+                action = self._convert_json_to_action(response_data)
+                if ENFORCE_GAME_CLOCK:
+                    self.game_clock = response_data.get("game_clock", self.game_clock)
+                    if self.game_clock <= 0:
+                        raise TimeoutError("Game clock has run out")
+                return action
+            except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+                if attempt < ACTION_REQUEST_RETRIES - 1:
+                    await asyncio.sleep(ACTION_REQUEST_TIMEOUT)
+                else:
+                    print("An error occurred during action request")
+                    return None
 
-            end_time = time.perf_counter()
-            duration = end_time - start_time
-
-            if ENFORCE_GAME_CLOCK:
-                self.game_clock -= duration
-            if self.game_clock <= 0:
-                raise TimeoutError("Game clock has run out")
-
-            return action
-
-    def end_round(
+    async def end_round(
         self,
         player_hand: List[str],
         opponent_hand: List[str],
@@ -195,34 +117,24 @@ class Client:
         delta: int,
         is_match_over: bool,
     ) -> None:
-        """
-        Signals the end of a round to the pokerbot, including the final state of the game and whether the match is over.
-
-        Args:
-            player_hand (List[str]): The final hand of the player.
-            opponent_hand (List[str]): The final hand of the opponent.
-            board_cards (List[str]): The cards visible on the board.
-            new_actions (Deque[Action]): Any actions that occurred after the last action request.
-            delta (int): The change in the player's bankroll after the round.
-            is_match_over (bool): Indicates whether the match has concluded.
-        """
-        proto_actions = self._convert_actions_to_proto(new_actions)
-
-        end_round_message = EndRoundMessage(
-            player_hand=player_hand,
-            opponent_hand=opponent_hand,
-            board_cards=board_cards,
-            new_actions=proto_actions,
-            delta=delta,
-            is_match_over=is_match_over,
-        )
-
+        request = {
+            "end_round": {
+                "player_hand": player_hand,
+                "opponent_hand": opponent_hand,
+                "board_cards": board_cards,
+                "new_actions": self._convert_actions_to_json(new_actions),
+                "delta": delta,
+                "is_match_over": is_match_over,
+            }
+        }
         try:
-            new_logs = self.stub.EndRound(end_round_message).logs
+            await self.websocket.send(json.dumps(request))
+            response = await self.websocket.recv()
+            response_data = json.loads(response)
+            new_logs = response_data.get("logs", [])
             for log_entry in new_logs:
                 entry_bytes = log_entry.encode("utf-8")
                 entry_size = len(entry_bytes)
-
                 if self.log_size + entry_size <= PLAYER_LOG_SIZE_LIMIT:
                     self.log.append(log_entry)
                     self.log_size += entry_size
@@ -233,67 +145,46 @@ class Client:
                         )
                         self.log_size = PLAYER_LOG_SIZE_LIMIT
                     break
-        except grpc.RpcError as e:
-            print(f"An error occurred: {e}")
+        except websockets.exceptions.ConnectionClosed:
+            print("An error occurred during end round")
 
-    def _convert_actions_to_proto(self, actions: Deque[Action]) -> List[ProtoAction]:
-        """
-        Converts a deque of Action objects to a list of protobuf Action messages, clearing the deque in the process.
+    async def close(self) -> None:
+        if self.websocket:
+            await self.websocket.close()
 
-        Args:
-            actions (Deque[Action]): The actions to convert and clear.
-
-        Returns:
-            List[ProtoAction]: The list of converted protobuf Action messages.
-        """
-        proto_actions = []
+    def _convert_actions_to_json(self, actions: Deque[Action]) -> List[dict]:
+        json_actions = []
         while actions:
             action = actions.popleft()
-            proto_action = self._convert_action_to_proto(action)
-            if proto_action:
-                proto_actions.append(proto_action)
-        return proto_actions
+            json_action = self._convert_action_to_json(action)
+            if json_action:
+                json_actions.append(json_action)
+        return json_actions
 
     @staticmethod
-    def _convert_proto_to_action(proto_action: ProtoAction) -> Optional[Action]:
-        """
-        Converts a protobuf Action message back to a Python-native Action object.
-
-        Args:
-            proto_action (ProtoAction): The protobuf Action message to convert.
-
-        Returns:
-            Optional[Action]: The converted Python-native Action object, or None if conversion is not possible.
-        """
-        if proto_action.action == ActionType.FOLD:
+    def _convert_json_to_action(json_action: dict) -> Optional[Action]:
+        action_type = json_action.get("action")
+        if action_type == "FOLD":
             return FoldAction()
-        elif proto_action.action == ActionType.CALL:
+        elif action_type == "CALL":
             return CallAction()
-        elif proto_action.action == ActionType.CHECK:
+        elif action_type == "CHECK":
             return CheckAction()
-        elif proto_action.action == ActionType.RAISE:
-            return RaiseAction(amount=proto_action.amount)
-        else:
-            return None
+        elif action_type == "RAISE":
+            amount = json_action.get("amount")
+            if amount is not None:
+                return RaiseAction(amount=amount)
+        return None
 
     @staticmethod
-    def _convert_action_to_proto(action: Action) -> Optional[ProtoAction]:
-        """
-        Converts a single Action object to its corresponding protobuf Action message.
-
-        Args:
-            action (Action): The action to convert.
-
-        Returns:
-            Optional[ProtoAction]: The converted protobuf Action message, or None if conversion is not applicable.
-        """
+    def _convert_action_to_json(action: Action) -> Optional[dict]:
         if isinstance(action, FoldAction):
-            return ProtoAction(action=ActionType.FOLD)
+            return {"action": "FOLD"}
         elif isinstance(action, CallAction):
-            return ProtoAction(action=ActionType.CALL)
+            return {"action": "CALL"}
         elif isinstance(action, CheckAction):
-            return ProtoAction(action=ActionType.CHECK)
+            return {"action": "CHECK"}
         elif isinstance(action, RaiseAction):
-            return ProtoAction(action=ActionType.RAISE, amount=action.amount)
+            return {"action": "RAISE", "amount": action.amount}
         else:
             return None

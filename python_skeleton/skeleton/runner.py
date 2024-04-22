@@ -1,110 +1,69 @@
-"""
-The infrastructure for interacting with the engine.
-"""
+import asyncio
+import json
 
-from argparse import ArgumentParser
-from concurrent import futures
-import grpc
-import os
-import sys
-from typing import List
-
-from skeleton.actions import Action, FoldAction, CallAction, CheckAction, RaiseAction
+import websockets
+from skeleton.actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
+from skeleton.bot import Bot
 from skeleton.states import (
+    BIG_BLIND,
+    SMALL_BLIND,
+    STARTING_STACK,
     GameState,
     RoundState,
     TerminalState,
-    STARTING_STACK,
-    BIG_BLIND,
-    SMALL_BLIND,
 )
-from skeleton.bot import Bot
-
-shared_path = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "shared")
-)
-sys.path.append(shared_path)
-
-from pokerbot_pb2 import (  # noqa: E402
-    Action as ProtoAction,
-    ActionType,
-    ReadyCheckRequest,
-    ReadyCheckResponse,
-    ActionRequest,
-    ActionResponse,
-    EndRoundMessage,
-    EndRoundResponse
-)
-from pokerbot_pb2_grpc import PokerBotServicer, add_PokerBotServicer_to_server  # noqa: E402
 
 
-class Runner(PokerBotServicer):
-    """
-    Interacts with the engine.
-    """
-
+class Runner:
     def __init__(self, pokerbot: Bot):
-        """
-        Initializes a new instance of the Runner class.
-
-        Args:
-            pokerbot (Bot): The pokerbot to use for decision making.
-        """
         self.pokerbot: Bot = pokerbot
         self.game_state = GameState(0, 0.0, 1)
         self.round_state = None
         self.round_flag = True
 
-    def ReadyCheck(
-        self, request: ReadyCheckRequest, context: grpc.ServicerContext
-    ) -> ReadyCheckResponse:
-        """
-        Performs a readiness check.
+    async def handle_message(self, websocket, path):
+        while True:
+            try:
+                message = await websocket.recv()
+                request = json.loads(message)
 
-        Args:
-            request (ReadyCheckRequest): The request containing player names.
-            context (grpc.ServicerContext): The gRPC context.
+                if "ready_check" in request:
+                    response = await self.ReadyCheck(request["ready_check"])
+                    await websocket.send(json.dumps(response))
+                elif "request_action" in request:
+                    response = await self.RequestAction(request["request_action"])
+                    await websocket.send(json.dumps(response))
+                elif "end_round" in request:
+                    response = await self.EndRound(request["end_round"])
+                    await websocket.send(json.dumps(response))
+            except websockets.exceptions.ConnectionClosed:
+                break
 
-        Returns:
-            ReadyCheckResponse: The response indicating readiness.
-        """
-        return ReadyCheckResponse(ready=True)
+    async def ReadyCheck(self, request):
+        return {"ready": True}
 
-    def RequestAction(
-        self, request: ActionRequest, context: grpc.ServicerContext
-    ) -> ActionResponse:
-        """
-        Requests an action from the pokerbot.
-
-        Args:
-            request (ActionRequest): The request containing game state information.
-            context (grpc.ServicerContext): The gRPC context.
-
-        Returns:
-            ActionResponse: The response containing the chosen action.
-        """
+    async def RequestAction(self, request):
         self.game_state = GameState(
             self.game_state.bankroll,
-            request.game_clock,
+            request["game_clock"],
             self.game_state.round_num,
         )
 
-        if self.round_flag:  # new hand
-            self._new_round(list(request.player_hand), list(request.board_cards))
+        if self.round_flag:
+            self._new_round(request["player_hand"], request["board_cards"])
         else:
-            self.round_state = RoundState(  # update the board cards
+            self.round_state = RoundState(
                 self.round_state.button,
                 self.round_state.street,
                 self.round_state.pips,
                 self.round_state.stacks,
                 self.round_state.hands,
-                list(request.board_cards),
+                request["board_cards"],
                 self.round_state.previous_state,
             )
 
-        for proto_action in request.new_actions:
-            action = self._convert_proto_action(proto_action)
-            self.round_state = self.round_state.proceed(action)
+        for action in request["new_actions"]:
+            self.round_state = self.round_state.proceed(self._convert_action(action))
 
         active = self.round_state.button % 2
         observation = {
@@ -128,23 +87,13 @@ class Runner(PokerBotServicer):
 
         return self._convert_action_to_response(action)
 
-    def EndRound(self, request: EndRoundMessage, context: grpc.ServicerContext) -> EndRoundResponse:
-        """
-        Handles the end of a round.
-
-        Args:
-            request (EndRoundMessage): The request containing round results.
-            context (grpc.ServicerContext): The gRPC context.
-        
-        Returns:
-            EndRoundResponse: The response containing the pokerbot's logs.
-        """
+    async def EndRound(self, request):
         if self.round_flag:
-            self._new_round(list(request.player_hand), list(request.board_cards))
+            self._new_round(request["player_hand"], request["board_cards"])
         if isinstance(self.round_state, TerminalState):
             self.round_state = self.round_state.previous_state
         hands = self.round_state.hands
-        hands[1] = list(request.opponent_hand)
+        hands[1] = request["opponent_hand"]
         self.round_state = RoundState(
             button=self.round_state.button,
             street=self.round_state.street,
@@ -155,70 +104,49 @@ class Runner(PokerBotServicer):
             previous_state=self.round_state.previous_state,
         )
 
-        for proto_action in request.new_actions:
-            action = self._convert_proto_action(proto_action)
-            self.round_state = self.round_state.proceed(action)
+        for action in request["new_actions"]:
+            self.round_state = self.round_state.proceed(self._convert_action(action))
 
         deltas = [0, 0]
-        deltas[self.active] = request.delta
-        deltas[1 - self.active] = -request.delta
+        deltas[self.active] = request["delta"]
+        deltas[1 - self.active] = -request["delta"]
         self.round_state = TerminalState(deltas, self.round_state.previous_state)
 
         bot_logs = self.pokerbot.handle_round_over(
-            self.game_state, self.round_state, self.active, request.is_match_over
+            self.game_state, self.round_state, self.active, request["is_match_over"]
         )
 
         self.game_state = GameState(
-            bankroll=self.game_state.bankroll + request.delta,
+            bankroll=self.game_state.bankroll + request["delta"],
             game_clock=self.game_state.game_clock,
             round_num=self.game_state.round_num + 1,
         )
 
         self.round_flag = True
 
-        return EndRoundResponse(logs=bot_logs)
+        return {"logs": bot_logs}
 
-    def _convert_action_to_response(self, action: Action) -> ActionResponse:
-        """
-        Converts an Action object to its corresponding ActionResponse.
-
-        Args:
-            action (Action): The action to convert.
-
-        Returns:
-            ActionResponse: The converted ActionResponse.
-        """
+    def _convert_action_to_response(self, action: Action):
         if isinstance(action, FoldAction):
-            return ActionResponse(action=ProtoAction(action=ActionType.FOLD))
+            return {"action": "FOLD"}
         elif isinstance(action, CallAction):
-            return ActionResponse(action=ProtoAction(action=ActionType.CALL))
+            return {"action": "CALL"}
         elif isinstance(action, CheckAction):
-            return ActionResponse(action=ProtoAction(action=ActionType.CHECK))
+            return {"action": "CHECK"}
         elif isinstance(action, RaiseAction):
-            return ActionResponse(
-                action=ProtoAction(action=ActionType.RAISE, amount=action.amount)
-            )
+            return {"action": "RAISE", "amount": action.amount}
 
-    def _convert_proto_action(self, proto_action) -> Action:
-        """
-        Converts a proto action to its corresponding Action object.
-
-        Args:
-            proto_action: The proto action to convert.
-
-        Returns:
-            Action: The converted Action object.
-        """
-        if proto_action.action == ActionType.FOLD:
+    def _convert_action(self, action):
+        if action["action"] == "FOLD":
             return FoldAction()
-        elif proto_action.action == ActionType.CALL:
+        elif action["action"] == "CALL":
             return CallAction()
-        elif proto_action.action == ActionType.CHECK:
+        elif action["action"] == "CHECK":
             return CheckAction()
-        elif proto_action.action == ActionType.RAISE:
-            return RaiseAction(proto_action.amount)
+        elif action["action"] == "RAISE":
+            return RaiseAction(action["amount"])
 
-    def _new_round(self, hand: List[str], board: List[str]) -> RoundState:
+    def _new_round(self, hand, board):
         self.round_state = RoundState(
             button=0,
             street=0,
@@ -233,20 +161,12 @@ class Runner(PokerBotServicer):
         self.round_flag = False
 
 
-def parse_args():
-    parser = ArgumentParser()
-    parser.add_argument("--port", type=int, default=50051, help="Port to listen on")
-    return parser.parse_args()
+async def run_bot(pokerbot):
+    runner = Runner(pokerbot)
+    async with websockets.serve(runner.handle_message, "localhost", 8765):
+        await asyncio.Future()
 
 
-def run_bot(pokerbot, args):
-    """
-    Starts the gRPC server and runs the pokerbot.
-    """
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
-    add_PokerBotServicer_to_server(Runner(pokerbot), server)
-    server.add_insecure_port(f"[::]:{args.port}")
-    server.start()
-    print(f"Pokerbot server started on port {args.port}")
-    server.wait_for_termination()
-    print("Terminated server")
+if __name__ == "__main__":
+    pokerbot = Bot()
+    asyncio.run(run_bot(pokerbot))

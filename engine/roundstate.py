@@ -1,6 +1,6 @@
 from collections import namedtuple
-from typing import Set, Type
 from itertools import combinations
+from typing import Set, Type
 
 from .actions import (
     Action,

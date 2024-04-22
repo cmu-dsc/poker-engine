@@ -5,7 +5,7 @@ Encapsulates game and round state information for the player.
 from collections import namedtuple
 from typing import List, Tuple
 
-from skeleton.actions import Action, FoldAction, CallAction, CheckAction, RaiseAction
+from skeleton.actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
 
 # Constants for game settings
 NUM_ROUNDS = 1000

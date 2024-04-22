@@ -7,11 +7,19 @@ import pickle
 from typing import Optional
 
 from skeleton.actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
-from skeleton.states import GameState, TerminalState, RoundState
-from skeleton.states import NUM_ROUNDS, STARTING_STACK, BIG_BLIND, SMALL_BLIND
 from skeleton.bot import Bot
-from skeleton.runner import parse_args, run_bot
 from skeleton.evaluate import evaluate
+from skeleton.runner import run_bot
+from skeleton.states import (
+    BIG_BLIND,
+    NUM_ROUNDS,
+    SMALL_BLIND,
+    STARTING_STACK,
+    GameState,
+    RoundState,
+    TerminalState,
+)
+
 
 class Player(Bot):
     """
@@ -146,4 +154,4 @@ class Player(Bot):
         return action
 
 if __name__ == '__main__':
-    run_bot(Player(), parse_args())
+    run_bot(Player())

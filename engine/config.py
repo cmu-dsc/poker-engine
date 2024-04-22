@@ -1,14 +1,14 @@
 import csv
+import os
 from datetime import datetime
 from io import StringIO
-import os
 from typing import List, Union
 
+import sqlalchemy
 from google.auth import default
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.sql.connector import Connector
-import sqlalchemy
 
 # PARAMETERS TO CONTROL THE BEHAVIOR OF THE GAME ENGINE
 
@@ -16,9 +16,9 @@ import sqlalchemy
 PLAYER_1_NAME = os.getenv("PLAYER_1_NAME", "all-in-bot")
 PLAYER_2_NAME = os.getenv("PLAYER_2_NAME", "prob-bot")
 
-# DNS names for player bots, retrieved from environment variables
-PLAYER_1_DNS = os.getenv("PLAYER_1_DNS", "localhost:50051")
-PLAYER_2_DNS = os.getenv("PLAYER_2_DNS", "localhost:50052")
+# PLAYER_1_WEBSOCKET_URI AND PLAYER_2_WEBSOCKET_URI ARE THE WEBSOCKET ENDPOINTS FOR THE PLAYER BOTS
+PLAYER_1_WEBSOCKET_URI = os.getenv("PLAYER_1_WEBSOCKET_URI", "ws://localhost:8765")
+PLAYER_2_WEBSOCKET_URI = os.getenv("PLAYER_2_WEBSOCKET_URI", "ws://localhost:8766")
 
 # GAME PROGRESS IS RECORDED HERE
 MATCH_ID = os.getenv("MATCH_ID", 0)
@@ -106,7 +106,9 @@ def add_match_entry(player1_bankroll: int, player2_bankroll: int) -> None:
     db_name = os.getenv("DB_NAME")
 
     if not (instance_connection_name and db_user and db_pass and db_name):
-        print("No connection name or database credentials found, skipping updating table.")
+        print(
+            "No connection name or database credentials found, skipping updating table."
+        )
         return
 
     with Connector() as connector:
@@ -118,7 +120,7 @@ def add_match_entry(player1_bankroll: int, player2_bankroll: int) -> None:
                 user=db_user,
                 password=db_pass,
                 db=db_name,
-                ip_type="private"
+                ip_type="private",
             )
             return conn
 
