@@ -1,35 +1,44 @@
-from collections import deque
 import json
-import grpc
 import os
 import sys
 import time
+from collections import deque
 from typing import Deque, List, Optional
+
+import grpc
+import picologging as logging
+import picologging.handlers
+
+from engine.engine import _get_unique_filename
 
 from .actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
 from .config import (
-    CONNECT_TIMEOUT,
-    CONNECT_RETRIES,
-    READY_CHECK_TIMEOUT,
-    READY_CHECK_RETRIES,
-    ACTION_REQUEST_TIMEOUT,
     ACTION_REQUEST_RETRIES,
+    ACTION_REQUEST_TIMEOUT,
+    BOT_LOG_FILENAME,
+    CONNECT_RETRIES,
+    CONNECT_TIMEOUT,
     ENFORCE_GAME_CLOCK,
-    STARTING_GAME_CLOCK,
+    LOGS_DIRECTORY,
     PLAYER_LOG_SIZE_LIMIT,
+    READY_CHECK_RETRIES,
+    READY_CHECK_TIMEOUT,
+    STARTING_GAME_CLOCK,
 )
 
 shared_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "shared"))
 sys.path.append(shared_path)
 
-from shared.pokerbot_pb2_grpc import PokerBotStub  # noqa: E402
 from shared.pokerbot_pb2 import (  # noqa: E402
-    ReadyCheckRequest,
-    ActionRequest,
-    EndRoundMessage,
-    ActionType,
     Action as ProtoAction,
 )
+from shared.pokerbot_pb2 import (  # noqa: E402
+    ActionRequest,
+    ActionType,
+    EndRoundMessage,
+    ReadyCheckRequest,
+)
+from shared.pokerbot_pb2_grpc import PokerBotStub  # noqa: E402
 
 
 class Client:
@@ -56,8 +65,18 @@ class Client:
         self.bankroll = 0
         self.channel = None
         self.stub = None
-        self.log = deque()
         self.log_size = 0
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        player_log_directory = os.path.join(LOGS_DIRECTORY, name)
+        os.makedirs(player_log_directory, exist_ok=True)
+        player_log_filename = _get_unique_filename(f"{BOT_LOG_FILENAME}.txt", player_log_directory)
+        player_file_handler = logging.FileHandler(os.path.join(player_log_directory, player_log_filename))
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        player_file_handler.setFormatter(formatter)
+        self.logger.addHandler(player_file_handler)
 
         self._connect_with_retries()
 
@@ -224,11 +243,11 @@ class Client:
                 entry_size = len(entry_bytes)
 
                 if self.log_size + entry_size <= PLAYER_LOG_SIZE_LIMIT:
-                    self.log.append(log_entry)
+                    self.logger.debug(log_entry)
                     self.log_size += entry_size
                 else:
                     if self.log_size < PLAYER_LOG_SIZE_LIMIT:
-                        self.log.append(
+                        self.logger.debug(
                             "Log size limit reached. No further entries will be added."
                         )
                         self.log_size = PLAYER_LOG_SIZE_LIMIT
