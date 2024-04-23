@@ -15,6 +15,6 @@ RUN /root/.cargo/bin/uv pip install --no-cache-dir -r requirements.txt
 
 COPY python_skeleton/ ./python_skeleton/
 
-EXPOSE 50051
+EXPOSE 8765
 
-CMD ["python", "python_skeleton/prob_bot.py"]
+CMD ["python", "python_skeleton/prob_bot.py", "--port", "8765"]

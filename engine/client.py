@@ -48,24 +48,43 @@ class Client:
 
     async def connect(self) -> None:
         """
-        Connects to the WebSocket server with retries.
+        Connects to the WebSocket server with retries and improved error handling.
         """
-        for attempt in range(CONNECT_RETRIES):
+        for attempt in range(1, CONNECT_RETRIES + 1):
             try:
                 self.websocket = await asyncio.wait_for(
                     websockets.connect(self.websocket_uri), timeout=CONNECT_TIMEOUT
                 )
                 print(f"Connected to {self.websocket_uri}")
                 return
-            except (InvalidURI, InvalidHandshake):
-                raise RuntimeError(f"Invalid WebSocket URI: {self.websocket_uri}")
-            except (asyncio.TimeoutError, ConnectionClosed):
-                if attempt < CONNECT_RETRIES - 1:
-                    await asyncio.sleep(CONNECT_TIMEOUT)
+            except (InvalidURI, InvalidHandshake) as e:
+                print(f"Error: Invalid WebSocket URI or handshake failure: {e}")
+                raise RuntimeError(
+                    f"Invalid WebSocket URI: {self.websocket_uri}"
+                ) from e
+            except (
+                asyncio.TimeoutError,
+                ConnectionRefusedError,
+                ConnectionClosed,
+            ) as e:
+                if attempt < CONNECT_RETRIES:
+                    retry_delay = CONNECT_TIMEOUT * (2 ** (attempt - 1))
+                    print(
+                        f"Connection attempt {attempt} failed for {self.name}. Retrying in {retry_delay} seconds..."
+                    )
+                    await asyncio.sleep(retry_delay)
                 else:
+                    print(
+                        f"Failed to connect to {self.websocket_uri} after {CONNECT_RETRIES} attempts: {e}"
+                    )
                     raise RuntimeError(
                         f"Failed to connect to {self.websocket_uri} after {CONNECT_RETRIES} attempts"
-                    )
+                    ) from e
+            except Exception as e:
+                print(
+                    f"Unexpected error occurred while connecting to {self.websocket_uri}: {e}"
+                )
+                raise
 
     async def check_ready(self, player_names: List[str]) -> bool:
         """
