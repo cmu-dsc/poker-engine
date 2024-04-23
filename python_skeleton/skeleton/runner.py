@@ -164,7 +164,7 @@ class Runner:
 
 async def run_bot(pokerbot, port):
     runner = Runner(pokerbot)
-    async with websockets.serve(runner.handle_message, "localhost", port):
+    async with websockets.serve(runner.handle_message, None, port):
         await asyncio.Future()
 
 
