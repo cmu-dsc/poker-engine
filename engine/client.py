@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from collections import deque
 from typing import Deque, List, Optional
 
@@ -97,6 +98,8 @@ class Client:
         }
         for attempt in range(ACTION_REQUEST_RETRIES):
             try:
+                start_time = time.perf_counter()
+
                 await asyncio.wait_for(
                     self.websocket.send(json.dumps(request)),
                     timeout=ACTION_REQUEST_TIMEOUT,
@@ -104,12 +107,18 @@ class Client:
                 response = await asyncio.wait_for(
                     self.websocket.recv(), timeout=ACTION_REQUEST_TIMEOUT
                 )
+
+                end_time = time.perf_counter()
+                duration = end_time - start_time
+
                 response_data = json.loads(response)
                 action = self._convert_json_to_action(response_data)
+
                 if ENFORCE_GAME_CLOCK:
-                    self.game_clock = response_data.get("game_clock", self.game_clock)
+                    self.game_clock -= duration
                     if self.game_clock <= 0:
                         raise TimeoutError("Game clock has run out")
+
                 return action
             except (asyncio.TimeoutError, ConnectionClosed):
                 if attempt < ACTION_REQUEST_RETRIES - 1:
