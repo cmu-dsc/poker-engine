@@ -43,6 +43,9 @@ class Game:
     """
 
     def __init__(self) -> None:
+        """
+        Initializes a new instance of the Game class.
+        """
         self.players: List[Client] = []
         self.log: List[str] = [
             f"CMU Poker Bot Game - {PLAYER_1_NAME} vs {PLAYER_2_NAME}"
@@ -63,11 +66,13 @@ class Game:
         self.new_actions: List[Deque[Action]] = [deque(), deque()]
         self.round_num = 0
 
-    def log_round_state(self, round_state: RoundState):
+    def log_round_state(self, round_state: RoundState) -> None:
         """
         Logs the current state of the round.
-        """
 
+        Args:
+            round_state (RoundState): The current state of the round.
+        """
         if round_state.street == 0 and round_state.button == 0:
             self.log.append(f"{self.players[0].name} posts the blind of {SMALL_BLIND}")
             self.log.append(f"{self.players[1].name} posts the blind of {BIG_BLIND}")
@@ -82,7 +87,7 @@ class Game:
             )
 
         elif round_state.street > 0 and round_state.button == 1:
-            # log the pot every street
+            # Log the pot at the start of each street
             pot = (
                 STARTING_STACK
                 - round_state.stacks[0]
@@ -98,6 +103,11 @@ class Game:
     ) -> None:
         """
         Logs an action taken by a player.
+
+        Args:
+            player_name (str): The name of the player.
+            action (Action): The action taken by the player.
+            round_state (RoundState): The current state of the round.
         """
         if isinstance(action, FoldAction):
             self.log.append(f"{player_name} folds")
@@ -115,9 +125,13 @@ class Game:
     def log_terminal_state(self, round_state: TerminalState) -> None:
         """
         Logs the terminal state of a round, including outcomes.
+
+        Args:
+            round_state (TerminalState): The terminal state of the round.
         """
         previous_state = round_state.previous_state
-        if FoldAction not in previous_state.legal_actions():  # idk why this is needed
+        if FoldAction not in previous_state.legal_actions():
+            # Log the hands if the round didn't end with a fold
             self.log.append(f"{self.players[0].name} shows {previous_state.hands[0]}")
             self.log.append(f"{self.players[1].name} shows {previous_state.hands[1]}")
         self.log.append(f"{self.players[0].name} awarded {round_state.deltas[0]}")
@@ -128,6 +142,9 @@ class Game:
     async def run_round(self, last_round: bool) -> None:
         """
         Runs one round of poker (1 hand).
+
+        Args:
+            last_round (bool): Indicates if this is the last round of the match.
         """
         pips = [SMALL_BLIND, BIG_BLIND]
         stacks = [STARTING_STACK - SMALL_BLIND, STARTING_STACK - BIG_BLIND]
@@ -255,6 +272,14 @@ class Game:
             self._upload_or_write_file(player.log, log_filename)
 
     def _upload_or_write_file(self, content, base_filename, is_csv=False):
+        """
+        Uploads the log file to a cloud storage or writes it to a local file.
+
+        Args:
+            content (List[str]): The content of the log file.
+            base_filename (str): The base filename of the log file.
+            is_csv (bool): Indicates if the log file is in CSV format. Defaults to False.
+        """
         filename = self._get_unique_filename(base_filename)
         if not upload_logs(content, filename):
             filename = os.path.join(LOGS_DIRECTORY, filename)
@@ -271,6 +296,15 @@ class Game:
 
     @staticmethod
     def _get_unique_filename(base_filename):
+        """
+        Generates a unique filename based on the base filename.
+
+        Args:
+            base_filename (str): The base filename.
+
+        Returns:
+            str: The unique filename.
+        """
         file_idx = 1
         filename, ext = os.path.splitext(base_filename)
         unique_filename = base_filename
@@ -325,6 +359,15 @@ class Game:
     def _create_csv_row(
         self, round_state: RoundState, player_name: str, action: str, action_amt: int
     ) -> None:
+        """
+        Creates a CSV row for logging purposes.
+
+        Args:
+            round_state (RoundState): The current state of the round.
+            player_name (str): The name of the player.
+            action (str): The action taken by the player.
+            action_amt (int): The amount associated with the action (if applicable).
+        """
         self.csvlog.append(
             [
                 self.round_num,

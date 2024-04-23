@@ -5,11 +5,7 @@ from collections import deque
 from typing import Deque, List, Optional
 
 import websockets
-from websockets.exceptions import (
-    ConnectionClosed,
-    InvalidHandshake,
-    InvalidURI,
-)
+from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
 from .actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
 from .config import (
@@ -26,9 +22,21 @@ from .config import (
 
 
 class Client:
+    """
+    Represents a client that communicates with a poker bot using WebSocket.
+    """
+
     def __init__(
         self, name: str, websocket_uri: str, auth_token: Optional[str] = None
     ) -> None:
+        """
+        Initializes a new instance of the Client class.
+
+        Args:
+            name (str): The name of the poker bot.
+            websocket_uri (str): The URI of the WebSocket server.
+            auth_token (Optional[str]): An optional authentication token.
+        """
         self.name = name
         self.websocket_uri = websocket_uri
         self.auth_token = auth_token
@@ -39,11 +47,13 @@ class Client:
         self.log_size = 0
 
     async def connect(self) -> None:
+        """
+        Connects to the WebSocket server with retries.
+        """
         for attempt in range(CONNECT_RETRIES):
             try:
                 self.websocket = await asyncio.wait_for(
-                    websockets.connect(self.websocket_uri),
-                    timeout=CONNECT_TIMEOUT,
+                    websockets.connect(self.websocket_uri), timeout=CONNECT_TIMEOUT
                 )
                 print(f"Connected to {self.websocket_uri}")
                 return
@@ -58,6 +68,15 @@ class Client:
                     )
 
     async def check_ready(self, player_names: List[str]) -> bool:
+        """
+        Checks if the poker bot is ready.
+
+        Args:
+            player_names (List[str]): The list of player names.
+
+        Returns:
+            bool: True if the bot is ready, False otherwise.
+        """
         request = {"ready_check": {"player_names": player_names}}
         print(f"Sending ready check request: {request}")
         for attempt in range(READY_CHECK_RETRIES):
@@ -88,6 +107,17 @@ class Client:
     async def request_action(
         self, player_hand: List[str], board_cards: List[str], new_actions: Deque[Action]
     ) -> Optional[Action]:
+        """
+        Requests an action from the poker bot.
+
+        Args:
+            player_hand (List[str]): The player's hand.
+            board_cards (List[str]): The board cards.
+            new_actions (Deque[Action]): The new actions since the last request.
+
+        Returns:
+            Optional[Action]: The action returned by the bot, or None if an error occurred.
+        """
         request = {
             "request_action": {
                 "game_clock": self.game_clock,
@@ -136,6 +166,17 @@ class Client:
         delta: int,
         is_match_over: bool,
     ) -> None:
+        """
+        Notifies the poker bot that the round has ended.
+
+        Args:
+            player_hand (List[str]): The player's hand.
+            opponent_hand (List[str]): The opponent's hand.
+            board_cards (List[str]): The board cards.
+            new_actions (Deque[Action]): The new actions since the last request.
+            delta (int): The change in the player's bankroll.
+            is_match_over (bool): Indicates whether the match is over.
+        """
         request = {
             "end_round": {
                 "player_hand": player_hand,
@@ -158,6 +199,7 @@ class Client:
                     self.log.append(log_entry)
                     self.log_size += entry_size
                 else:
+                    # Limit the size of the player's log to avoid excessive memory usage
                     if self.log_size < PLAYER_LOG_SIZE_LIMIT:
                         self.log.append(
                             "Log size limit reached. No further entries will be added."
@@ -168,10 +210,22 @@ class Client:
             print("An error occurred during end round")
 
     async def close(self) -> None:
+        """
+        Closes the WebSocket connection.
+        """
         if self.websocket:
             await self.websocket.close()
 
     def _convert_actions_to_json(self, actions: Deque[Action]) -> List[dict]:
+        """
+        Converts a deque of Action objects to a list of JSON-serializable dictionaries.
+
+        Args:
+            actions (Deque[Action]): The deque of actions to convert.
+
+        Returns:
+            List[dict]: The list of JSON-serializable dictionaries.
+        """
         json_actions = []
         while actions:
             action = actions.popleft()
@@ -182,6 +236,15 @@ class Client:
 
     @staticmethod
     def _convert_json_to_action(json_action: dict) -> Optional[Action]:
+        """
+        Converts a JSON-serializable dictionary to an Action object.
+
+        Args:
+            json_action (dict): The JSON-serializable dictionary to convert.
+
+        Returns:
+            Optional[Action]: The corresponding Action object, or None if the action type is unknown.
+        """
         action_type = json_action.get("action")
         if action_type == "FOLD":
             return FoldAction()
@@ -197,6 +260,15 @@ class Client:
 
     @staticmethod
     def _convert_action_to_json(action: Action) -> Optional[dict]:
+        """
+        Converts an Action object to a JSON-serializable dictionary.
+
+        Args:
+            action (Action): The Action object to convert.
+
+        Returns:
+            Optional[dict]: The corresponding JSON-serializable dictionary, or None if the action type is unknown.
+        """
         if isinstance(action, FoldAction):
             return {"action": "FOLD"}
         elif isinstance(action, CallAction):

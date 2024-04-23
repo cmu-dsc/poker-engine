@@ -35,7 +35,7 @@ class RoundState(
         """
         Compares the player's hands and computes payoffs.
         """
-        if len(self.board) < 2: #equity chop ALL IN!
+        if len(self.board) < 2:  # equity chop ALL IN!
             p0Eq = 0
             comb = 0
             for combo in combinations(self.deck.cards, 2 - len(self.board)):
@@ -102,7 +102,9 @@ class RoundState(
         """
         Resets the players' pips and advances the game tree to the next round of betting.
         """
-        if self.street >= 2 or sum(self.stacks)==0:  # After river, proceed to showdown OR equity chop
+        if (
+            self.street >= 2 or sum(self.stacks) == 0
+        ):  # After river, proceed to showdown OR equity chop
             return self.showdown()
 
         # Dealing the next card (flop or river) and advancing the street

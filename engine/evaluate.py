@@ -59,7 +59,7 @@ def is_4flush(hand: List[str]) -> bool:
 def is_4straight(hand: List[str]) -> bool:
     ranks = [int(card[0]) for card in hand]
     return max(ranks) - min(ranks) == 3 and len(set(ranks)) == 4
-    
+
 
 def is_3straight(hand: List[str]) -> bool:
     ranks = sorted(int(card[0]) for card in hand)
