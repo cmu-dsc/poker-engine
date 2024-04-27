@@ -3,12 +3,12 @@ CMU Poker Bot Competition Game Engine 2024
 """
 
 import csv
-import os
 from collections import deque
+import os
 from typing import Deque, List
 
 import picologging as logging
-import picologging.handlers
+from picologging.handlers import RotatingFileHandler
 
 from .actions import (
     STREET_NAMES,
@@ -22,9 +22,8 @@ from .actions import (
 from .client import Client
 from .config import (
     BIG_BLIND,
-    BOT_LOG_FILENAME,
-    GAME_LOG_FILENAME,
-    LOGS_DIRECTORY,
+    GAME_LOG_CSV_FILENAME,
+    GAME_LOG_TXT_FILENAME,
     NUM_ROUNDS,
     PLAYER_1_DNS,
     PLAYER_1_NAME,
@@ -32,28 +31,19 @@ from .config import (
     PLAYER_2_NAME,
     SMALL_BLIND,
     STARTING_STACK,
-    add_match_entry,
-    upload_logs,
 )
 from .evaluate import ShortDeck
 from .roundstate import RoundState
 
-@staticmethod
-def _get_unique_filename(base_filename):
-    file_idx = 1
-    filename, ext = os.path.splitext(base_filename)
-    unique_filename = base_filename
-    while os.path.exists(unique_filename):
-        unique_filename = f"{filename}_{file_idx}{ext}"
-        file_idx += 1
-    return unique_filename
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-os.makedirs(LOGS_DIRECTORY, exist_ok=True)
-engine_log_filename = _get_unique_filename(f"{GAME_LOG_FILENAME}.txt", LOGS_DIRECTORY)
-file_handler = logging.FileHandler(os.path.join(LOGS_DIRECTORY, engine_log_filename))
+should_roll_over = os.path.isfile(GAME_LOG_TXT_FILENAME)
+file_handler = RotatingFileHandler(
+    GAME_LOG_TXT_FILENAME, mode="w", backupCount=5, delay=True
+)
+if should_roll_over:
+    file_handler.doRollover()
 file_handler.setLevel(logging.DEBUG)
 
 console_handler = logging.StreamHandler()
@@ -75,19 +65,20 @@ class Game:
     def __init__(self) -> None:
         self.players: List[Client] = []
         logger.info(f"CMU Poker Bot Game - {PLAYER_1_NAME} vs {PLAYER_2_NAME}")
-        self.csvlog: List[str] = [
-            [
-                "Round",
-                "Street",
-                "Team",
-                "Action",
-                "ActionAmt",
-                "Team1Cards",
-                "Team2Cards",
-                "AllCards",
-                "Bankroll",
-            ]
+        csv_header = [
+            "Round",
+            "Street",
+            "Team",
+            "Action",
+            "ActionAmt",
+            "Team1Cards",
+            "Team2Cards",
+            "AllCards",
+            "Bankroll",
         ]
+        with open(GAME_LOG_CSV_FILENAME, mode="a", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(csv_header)
         self.new_actions: List[Deque[Action]] = [deque(), deque()]
         self.round_num = 0
 
@@ -257,49 +248,6 @@ class Game:
             f"{self.original_players[1].name} Bankroll: {self.original_players[1].bankroll}"
         )
 
-        self._finalize_log()
-        add_match_entry(
-            self.original_players[0].bankroll, self.original_players[1].bankroll
-        )
-
-    def _finalize_log(self) -> None:
-        """
-        Finalizes the game log, writing it to a file and uploading it.
-        """
-        csv_filename = f"{GAME_LOG_FILENAME}.csv"
-        self._upload_or_write_file(self.csvlog, csv_filename, is_csv=True)
-
-        log_filename = f"{GAME_LOG_FILENAME}.txt"
-        self._upload_or_write_file(self.log, log_filename)
-
-        for player in self.players:
-            log_filename = os.path.join(player.name, f"{BOT_LOG_FILENAME}.txt")
-            self._upload_or_write_file(player.log, log_filename)
-            
-    @staticmethod
-    def _get_latest_file(directory, base_filename):
-        files = [f for f in os.listdir(directory) if f.startswith(os.path.splitext(base_filename)[0])]
-        if not files:
-            return None
-        latest_file = max(files, key=lambda f: os.path.getmtime(os.path.join(directory, f)))
-        return os.path.join(directory, latest_file)
-
-
-    def _upload_or_write_file(self, content, base_filename, is_csv=False):
-        filename = self._get_unique_filename(base_filename)
-        if not upload_logs(content, filename):
-            filename = os.path.join(LOGS_DIRECTORY, filename)
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
-            print(f"Writing {filename}")
-            mode = "w"
-            newline = "" if is_csv else None
-            with open(filename, mode, newline=newline) as file:
-                if is_csv:
-                    writer = csv.writer(file)
-                    writer.writerows(content)
-                else:
-                    file.write("\n".join(content))
-
     def _validate_action(
         self, action: Action, round_state: RoundState, player_name: str
     ) -> Action:
@@ -346,7 +294,6 @@ class Game:
     def _create_csv_row(
         self, round_state: RoundState, player_name: str, action: str, action_amt: int
     ) -> None:
-        csv_filename = f"{GAME_LOG_FILENAME}.csv"
         csv_row = [
             self.round_num,
             round_state.street,
@@ -366,7 +313,7 @@ class Game:
             " ".join(round_state.board),
             self.original_players[0].bankroll,
         ]
-        with open(csv_filename, mode="a", newline="") as file:
+        with open(GAME_LOG_CSV_FILENAME, mode="a", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(csv_row)
 

@@ -1,29 +1,26 @@
 import json
+from logging.handlers import RotatingFileHandler
 import os
 import sys
 import time
-from collections import deque
 from typing import Deque, List, Optional
 
 import grpc
 import picologging as logging
-import picologging.handlers
 
-from engine.engine import _get_unique_filename
 
 from .actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
 from .config import (
     ACTION_REQUEST_RETRIES,
     ACTION_REQUEST_TIMEOUT,
-    BOT_LOG_FILENAME,
     CONNECT_RETRIES,
     CONNECT_TIMEOUT,
     ENFORCE_GAME_CLOCK,
-    LOGS_DIRECTORY,
     PLAYER_LOG_SIZE_LIMIT,
     READY_CHECK_RETRIES,
     READY_CHECK_TIMEOUT,
     STARTING_GAME_CLOCK,
+    get_player_filename,
 )
 
 shared_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "shared"))
@@ -68,10 +65,13 @@ class Client:
         self.log_size = 0
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
-        player_log_directory = os.path.join(LOGS_DIRECTORY, name)
-        os.makedirs(player_log_directory, exist_ok=True)
-        player_log_filename = _get_unique_filename(f"{BOT_LOG_FILENAME}.txt", player_log_directory)
-        player_file_handler = logging.FileHandler(os.path.join(player_log_directory, player_log_filename))
+        player_log_filename = get_player_filename(name)
+        should_roll_over = os.path.isfile(player_log_filename)
+        player_file_handler = RotatingFileHandler(
+            player_log_filename, mode="w", backupCount=5, delay=True
+        )
+        if should_roll_over:
+            player_file_handler.doRollover()
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
