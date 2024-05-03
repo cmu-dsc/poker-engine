@@ -7,8 +7,8 @@ from collections import deque
 import os
 from typing import Deque, List
 
-import picologging as logging
-from picologging.handlers import RotatingFileHandler
+import logging
+from logging.handlers import RotatingFileHandler
 
 from .actions import (
     STREET_NAMES,

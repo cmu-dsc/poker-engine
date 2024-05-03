@@ -6,7 +6,7 @@ import time
 from typing import Deque, List, Optional
 
 import grpc
-import picologging as logging
+import logging
 
 
 from .actions import Action, CallAction, CheckAction, FoldAction, RaiseAction
